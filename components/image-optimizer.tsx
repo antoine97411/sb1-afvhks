@@ -467,8 +467,8 @@ export function ImageOptimizer() {
                     <TableCell>
                       {image.status === 'processing' && (
                         <div className='w-full h-2 border rounded relative inset-0 overflow-hidden'>
-                        <div className="h-full absolute" style={{width: `${image.progress}%`, backgroundColor: "#ffffff"}}></div>
-                      </div>
+                          <div className="h-full absolute" style={{width: `${image.progress}%`, backgroundColor: "#ffffff"}}></div>
+                        </div>
                       )}
                       {image.status === 'completed' && (
                         <span className="text-green-500">Terminé</span>
