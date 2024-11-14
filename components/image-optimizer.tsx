@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
@@ -17,15 +17,22 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import { Image as ImageIcon, Upload, Download, Trash2, Settings, CheckSquare } from 'lucide-react';
+} from '@/components/ui/table';
+import {
+  Image as ImageIcon,
+  Upload,
+  Download,
+  Trash2,
+  Settings,
+  CheckSquare,
+} from 'lucide-react';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from '@/components/ui/select';
 import {
   Sheet,
   SheetContent,
@@ -33,7 +40,7 @@ import {
   SheetHeader,
   SheetTitle,
   SheetTrigger,
-} from "@/components/ui/sheet";
+} from '@/components/ui/sheet';
 
 interface ImageFile {
   id: string;
@@ -55,52 +62,95 @@ export function ImageOptimizer() {
   const [quality, setQuality] = useState(80);
   const [maxWidth, setMaxWidth] = useState(1920);
   const [maxHeight, setMaxHeight] = useState(1080);
-  const [format, setFormat] = useState<'webp' | 'jpeg' | 'png'>('webp');
+  const [format, setFormat] = useState<'webp' | 'jpeg' | 'png'>('jpeg');
+  const [isAdvancedMode, setIsAdvancedMode] = useState(false);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
-    const newImages = acceptedFiles.map(file => ({
+    const newImages = acceptedFiles.map((file) => ({
       id: Math.random().toString(36).substring(7),
       file,
       preview: URL.createObjectURL(file),
       originalSize: file.size,
       status: 'pending' as const,
-      progress: 0
+      progress: 0,
     }));
-    setImages(prev => [...prev, ...newImages]);
+    setImages((prev) => [...prev, ...newImages]);
   }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
-      'image/*': ['.png', '.jpg', '.jpeg', '.webp']
+      'image/*': ['.png', '.jpg', '.jpeg', '.webp'],
     },
-    multiple: true
+    multiple: true,
   });
+
+  const detectBrowser = () => {
+    const userAgent = window.navigator.userAgent.toLowerCase();
+    if (
+      userAgent.indexOf('safari') !== -1 &&
+      userAgent.indexOf('chrome') === -1
+    ) {
+      return 'safari';
+    }
+    return 'other';
+  };
 
   const optimizeImage = async (imageFile: ImageFile) => {
     try {
-      setImages(prev => prev.map(img => 
-        img.id === imageFile.id 
-          ? { ...img, status: 'processing' }
-          : img
-      ));
+      setImages((prev) =>
+        prev.map((img) =>
+          img.id === imageFile.id ? { ...img, status: 'processing' } : img
+        )
+      );
 
+      const browser = detectBrowser();
+      const isSafari = browser === 'safari';
+
+      // Ajustement des options pour Safari
       const options = {
         maxSizeMB: 1,
         maxWidthOrHeight: Math.max(maxWidth, maxHeight),
-        useWebWorker: true,
+        useWebWorker: !isSafari, // Désactivé pour Safari
         fileType: `image/${format}`,
-        quality: quality / 100,
+        quality: isSafari ? Math.min(quality / 100, 0.9) : quality / 100, // Limite à 0.9 pour Safari
+        initialQuality: isSafari ? 0.9 : quality / 100,
+        alwaysKeepResolution: true,
         onProgress: (progress: number) => {
-          setImages(prev => prev.map(img =>
-            img.id === imageFile.id
-              ? { ...img, progress }
-              : img
-          ));
-        }
+          setImages((prev) =>
+            prev.map((img) =>
+              img.id === imageFile.id ? { ...img, progress } : img
+            )
+          );
+        },
       };
 
-      const compressedFile = await imageCompression(imageFile.file, options);
+      // Pré-traitement pour Safari
+      let imageToCompress = imageFile.file;
+      if (isSafari) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+
+        await new Promise((resolve) => {
+          img.onload = resolve;
+          img.src = URL.createObjectURL(imageFile.file);
+        });
+
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx?.drawImage(img, 0, 0);
+
+        const blob = await new Promise<Blob>((resolve) => {
+          canvas.toBlob((b) => resolve(b!), `image/${format}`, quality / 100);
+        });
+
+        imageToCompress = new File([blob], imageFile.file.name, {
+          type: `image/${format}`,
+        });
+      }
+
+      const compressedFile = await imageCompression(imageToCompress, options);
       const optimizedUrl = URL.createObjectURL(compressedFile);
 
       // Get dimensions
@@ -110,41 +160,51 @@ export function ImageOptimizer() {
         img.onload = resolve;
       });
 
-      setImages(prev => prev.map(img =>
-        img.id === imageFile.id
-          ? {
-              ...img,
-              optimizedUrl,
-              optimizedSize: compressedFile.size,
-              status: 'completed',
-              progress: 100,
-              width: img.width,
-              height: img.height
-            }
-          : img
-      ));
+      setImages((prev) =>
+        prev.map((img) =>
+          img.id === imageFile.id
+            ? {
+                ...img,
+                optimizedUrl,
+                optimizedSize: compressedFile.size,
+                status: 'completed',
+                progress: 100,
+                width: img.width,
+                height: img.height,
+              }
+            : img
+        )
+      );
     } catch (error) {
-      setImages(prev => prev.map(img =>
-        img.id === imageFile.id
-          ? { ...img, status: 'error', error: (error as Error).message }
-          : img
-      ));
+      console.error("Erreur d'optimisation:", error);
+      setImages((prev) =>
+        prev.map((img) =>
+          img.id === imageFile.id
+            ? { ...img, status: 'error', error: (error as Error).message }
+            : img
+        )
+      );
     }
   };
 
   const optimizeAll = () => {
-    const imagesToOptimize = selectedImages.length > 0
-      ? images.filter(img => selectedImages.includes(img.id) && img.status === 'pending')
-      : images.filter(img => img.status === 'pending');
-    
-    imagesToOptimize.forEach(img => optimizeImage(img));
+    const imagesToOptimize =
+      selectedImages.length > 0
+        ? images.filter(
+            (img) => selectedImages.includes(img.id) && img.status === 'pending'
+          )
+        : images.filter((img) => img.status === 'pending');
+
+    imagesToOptimize.forEach((img) => optimizeImage(img));
   };
 
   const downloadImage = (imageFile: ImageFile) => {
     if (imageFile.optimizedUrl) {
       const link = document.createElement('a');
       link.href = imageFile.optimizedUrl;
-      link.download = `optimized-${imageFile.file.name.split('.')[0]}.${format}`;
+      link.download = `optimized-${
+        imageFile.file.name.split('.')[0]
+      }.${format}`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -152,20 +212,24 @@ export function ImageOptimizer() {
   };
 
   const downloadSelected = () => {
-    const imagesToDownload = selectedImages.length > 0
-      ? images.filter(img => selectedImages.includes(img.id) && img.status === 'completed')
-      : images.filter(img => img.status === 'completed');
+    const imagesToDownload =
+      selectedImages.length > 0
+        ? images.filter(
+            (img) =>
+              selectedImages.includes(img.id) && img.status === 'completed'
+          )
+        : images.filter((img) => img.status === 'completed');
 
-    imagesToDownload.forEach(img => downloadImage(img));
+    imagesToDownload.forEach((img) => downloadImage(img));
   };
 
   const removeImage = (id: string) => {
-    setImages(prev => prev.filter(img => img.id !== id));
-    setSelectedImages(prev => prev.filter(selectedId => selectedId !== id));
+    setImages((prev) => prev.filter((img) => img.id !== id));
+    setSelectedImages((prev) => prev.filter((selectedId) => selectedId !== id));
   };
 
   const removeSelected = () => {
-    setImages(prev => prev.filter(img => !selectedImages.includes(img.id)));
+    setImages((prev) => prev.filter((img) => !selectedImages.includes(img.id)));
     setSelectedImages([]);
   };
 
@@ -173,14 +237,14 @@ export function ImageOptimizer() {
     if (selectedImages.length === images.length) {
       setSelectedImages([]);
     } else {
-      setSelectedImages(images.map(img => img.id));
+      setSelectedImages(images.map((img) => img.id));
     }
   };
 
   const toggleImageSelection = (id: string) => {
-    setSelectedImages(prev =>
+    setSelectedImages((prev) =>
       prev.includes(id)
-        ? prev.filter(selectedId => selectedId !== id)
+        ? prev.filter((selectedId) => selectedId !== id)
         : [...prev, id]
     );
   };
@@ -232,37 +296,57 @@ export function ImageOptimizer() {
 
               <div className="space-y-2">
                 <Label>Format de Sortie</Label>
-                <Select value={format} onValueChange={(value: 'webp' | 'jpeg' | 'png') => setFormat(value)}>
+                <Select
+                  value={format}
+                  onValueChange={(value: 'webp' | 'jpeg' | 'png') =>
+                    setFormat(value)
+                  }
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Choisir le format" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="webp">WebP</SelectItem>
                     <SelectItem value="jpeg">JPEG</SelectItem>
                     <SelectItem value="png">PNG</SelectItem>
+                    <SelectItem value="webp">WebP</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Largeur Max</Label>
-                  <Input
-                    type="number"
-                    value={maxWidth}
-                    onChange={(e) => setMaxWidth(Number(e.target.value))}
-                    min={1}
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="advanced"
+                    checked={isAdvancedMode}
+                    onCheckedChange={(checked) =>
+                      setIsAdvancedMode(checked as boolean)
+                    }
                   />
+                  <Label htmlFor="advanced">Mode Avancé</Label>
                 </div>
-                <div className="space-y-2">
-                  <Label>Hauteur Max</Label>
-                  <Input
-                    type="number"
-                    value={maxHeight}
-                    onChange={(e) => setMaxHeight(Number(e.target.value))}
-                    min={1}
-                  />
-                </div>
+
+                {isAdvancedMode && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Largeur Max</Label>
+                      <Input
+                        type="number"
+                        value={maxWidth}
+                        onChange={(e) => setMaxWidth(Number(e.target.value))}
+                        min={1}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Hauteur Max</Label>
+                      <Input
+                        type="number"
+                        value={maxHeight}
+                        onChange={(e) => setMaxHeight(Number(e.target.value))}
+                        min={1}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </SheetContent>
@@ -290,7 +374,9 @@ export function ImageOptimizer() {
         <Card className="p-6">
           <div className="flex justify-between items-center mb-4">
             <div className="flex items-center gap-4">
-              <h2 className="text-xl font-semibold">Images ({images.length})</h2>
+              <h2 className="text-xl font-semibold">
+                Images ({images.length})
+              </h2>
               {selectedImages.length > 0 && (
                 <span className="text-sm text-muted-foreground">
                   {selectedImages.length} sélectionnée(s)
@@ -312,7 +398,9 @@ export function ImageOptimizer() {
               )}
               <Button onClick={optimizeAll}>
                 <Upload className="mr-2 h-4 w-4" />
-                {selectedImages.length > 0 ? 'Optimiser la sélection' : 'Tout Optimiser'}
+                {selectedImages.length > 0
+                  ? 'Optimiser la sélection'
+                  : 'Tout Optimiser'}
               </Button>
             </div>
           </div>
@@ -379,8 +467,8 @@ export function ImageOptimizer() {
                     <TableCell>
                       {image.status === 'processing' && (
                         <div className='w-full h-2 border rounded relative inset-0 overflow-hidden'>
-                        <div className="h-full absolute" style={{width: `${image.progress}%`, backgroundColor: "#ffffff"}}></div>
-                      </div>
+                          <div className="h-full absolute" style={{width: `${image.progress}%`, backgroundColor: "#ffffff"}}></div>
+                        </div>
                       )}
                       {image.status === 'completed' && (
                         <span className="text-green-500">Terminé</span>
@@ -389,7 +477,9 @@ export function ImageOptimizer() {
                         <span className="text-red-500">Erreur</span>
                       )}
                       {image.status === 'pending' && (
-                        <span className="text-muted-foreground">En attente</span>
+                        <span className="text-muted-foreground">
+                          En attente
+                        </span>
                       )}
                     </TableCell>
                     <TableCell>
